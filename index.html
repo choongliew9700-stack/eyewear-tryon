@@ -345,8 +345,26 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script>
 (function(){
+
+/* ---------------------------------------------------------- */
+/* FIREBASE                                                       */
+/* ---------------------------------------------------------- */
+const firebaseConfig = {
+  apiKey: "AIzaSyDZWTmJn_5-guz9ds3dzRufwA61ZAZdAVg",
+  authDomain: "halo-19bcf.firebaseapp.com",
+  projectId: "halo-19bcf",
+  storageBucket: "halo-19bcf.firebasestorage.app",
+  messagingSenderId: "243044684860",
+  appId: "1:243044684860:web:751a2b6aa47f7bae631f39"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+const framesDocRef = db.collection('eyewear').doc('frames');
+
 
 /* ---------------------------------------------------------- */
 /* I18N                                                          */
@@ -498,15 +516,35 @@ function loadFrames(){
     const raw = localStorage.getItem(STORE_KEY);
     if(raw){ return JSON.parse(raw); }
   }catch(e){}
-  const d = defaultFrames();
-  saveFrames(d);
-  return d;
+  return defaultFrames();
 }
 function saveFrames(frames){
   try{ localStorage.setItem(STORE_KEY, JSON.stringify(frames)); }catch(e){}
+  framesDocRef.set({ list: frames, updatedAt: Date.now() }).catch(e=>console.error('Firestore save error', e));
 }
 
 let FRAMES = loadFrames();
+let suppressNextSnapshot = false;
+
+function refreshVisibleUI(){
+  if($('catStage') && $('catStage').classList.contains('active')) buildCatGrid();
+  if($('frameStage') && $('frameStage').classList.contains('active')) buildFrameGrid();
+  if($('tryon') && $('tryon').classList.contains('active')){ buildThumbRow(); }
+  if($('catGrid')) buildCatGrid();
+}
+
+framesDocRef.onSnapshot(snap=>{
+  if(!snap.exists){
+    framesDocRef.set({ list: FRAMES, updatedAt: Date.now() }).catch(()=>{});
+    return;
+  }
+  const data = snap.data();
+  if(!data || !Array.isArray(data.list)) return;
+  FRAMES = data.list;
+  try{ localStorage.setItem(STORE_KEY, JSON.stringify(FRAMES)); }catch(e){}
+  refreshVisibleUI();
+}, err=>console.error('Firestore listen error', err));
+
 let currentCategory = null;
 let selectedFrameId = null;
 
