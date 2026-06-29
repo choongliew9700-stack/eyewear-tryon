@@ -363,7 +363,7 @@ const firebaseConfig = {
 };
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
-const framesDocRef = db.collection('eyewear').doc('frames');
+const framesColRef = db.collection('eyewear_frames');
 
 
 /* ---------------------------------------------------------- */
@@ -518,13 +518,23 @@ function loadFrames(){
   }catch(e){}
   return defaultFrames();
 }
+// saveFrames: upserts every frame in the list as its own Firestore document.
+// Each frame gets its own ~1MB budget instead of sharing one document.
 function saveFrames(frames){
   try{ localStorage.setItem(STORE_KEY, JSON.stringify(frames)); }catch(e){}
-  framesDocRef.set({ list: frames, updatedAt: Date.now() }).catch(e=>console.error('Firestore save error', e));
+  const batch = db.batch();
+  frames.forEach(f=>{
+    batch.set(framesColRef.doc(f.id), f);
+  });
+  batch.commit().catch(e=>console.error('Firestore save error', e));
+}
+function deleteFrameRemote(id){
+  framesColRef.doc(id).delete().catch(e=>console.error('Firestore delete error', e));
 }
 
 let FRAMES = loadFrames();
 let suppressNextSnapshot = false;
+let firstSnapshotDone = false;
 
 function refreshVisibleUI(){
   if($('catStage') && $('catStage').classList.contains('active')) buildCatGrid();
@@ -533,14 +543,18 @@ function refreshVisibleUI(){
   if($('catGrid')) buildCatGrid();
 }
 
-framesDocRef.onSnapshot(snap=>{
-  if(!snap.exists){
-    framesDocRef.set({ list: FRAMES, updatedAt: Date.now() }).catch(()=>{});
+framesColRef.onSnapshot(snap=>{
+  if(snap.empty && !firstSnapshotDone){
+    // first run, nothing in cloud yet: seed it with local/default frames
+    saveFrames(FRAMES);
+    firstSnapshotDone = true;
     return;
   }
-  const data = snap.data();
-  if(!data || !Array.isArray(data.list)) return;
-  FRAMES = data.list;
+  firstSnapshotDone = true;
+  const list = [];
+  snap.forEach(doc=> list.push(doc.data()));
+  if(list.length === 0) return; // avoid wiping local state on a transient empty read
+  FRAMES = list;
   try{ localStorage.setItem(STORE_KEY, JSON.stringify(FRAMES)); }catch(e){}
   refreshVisibleUI();
 }, err=>console.error('Firestore listen error', err));
@@ -605,6 +619,7 @@ function buildFrameGrid(){
       if(!confirm(t('deleteConfirm')(f.name))) return;
       FRAMES = FRAMES.filter(x=>x.id!==f.id);
       saveFrames(FRAMES);
+      deleteFrameRemote(f.id);
       delete imgCache[f.id+'_f'];
       delete imgCache[f.id+'_s'];
       if(selectedFrameId===f.id) selectedFrameId=null;
