@@ -138,6 +138,10 @@
   #sizeRow .label{font-size:12px; color:var(--muted); white-space:nowrap;}
   #sizeRow input[type=range]{flex:1; accent-color:var(--gold);}
   #sizeValue{font-size:12px; color:var(--gold-soft); width:42px; text-align:right;}
+  #verticalRow{display:flex; align-items:center; gap:10px; margin-top:10px; width:min(92vw,640px);}
+  #verticalRow .label{font-size:12px; color:var(--muted); white-space:nowrap;}
+  #verticalRow input[type=range]{flex:1; accent-color:var(--gold);}
+  #verticalValue{font-size:12px; color:var(--gold-soft); width:42px; text-align:right;}
 
   /* ---- tryon two-column layout + compare panel ---- */
   #tryonLayout{display:flex; gap:28px; align-items:flex-start; justify-content:center; width:100%; flex-wrap:wrap;}
@@ -285,6 +289,11 @@
           <input type="range" id="sizeSlider" min="0.6" max="1.6" step="0.02" value="1">
           <span id="sizeValue">100%</span>
         </div>
+        <div id="verticalRow">
+          <span class="label" data-i18n="verticalLabel">镜框高低</span>
+          <input type="range" id="verticalSlider" min="-1" max="1" step="0.02" value="0">
+          <span id="verticalValue">0%</span>
+        </div>
         <button id="restartBtn" data-i18n="restartBtn">重新扫描</button>
       </div>
       <div id="guidePanel">
@@ -377,7 +386,7 @@ const I18N = {
     chooseCat:'选择镜框系列', backToCat:'← 返回系列', tryBtn:'戴上试试',
     comparePanelLabel:'拍照对比', captureBtn:'📷 拍照', compareBtn:'对比选中的照片',
     compareHintInit:'选择2张照片来对比', switchFrame:'切换镜框:', fitBadge:'实时跟踪中',
-    sizeLabel:'镜框大小', restartBtn:'重新扫描', guidePanelLabel:'脸型选框参考',
+    sizeLabel:'镜框大小', verticalLabel:'镜框高低', restartBtn:'重新扫描', guidePanelLabel:'脸型选框参考',
     compareModalTitle:'照片对比', closeBtn:'关闭', addFrameTitle:'添加新镜框',
     frameNameLabel:'镜框名称', frameImageLabel:'镜框图片（建议透明背景PNG）',
     shapeLabel:'外形(没有上传图片时使用)', shapeRound:'圆框', shapeSquare:'方框', shapeCat:'猫眼框', shapeThin:'金属细框',
@@ -395,7 +404,7 @@ const I18N = {
     chooseCat:'Choose a Series', backToCat:'← Back to Series', tryBtn:'Try It On',
     comparePanelLabel:'Photo Compare', captureBtn:'📷 Capture', compareBtn:'Compare Selected',
     compareHintInit:'Select 2 photos to compare', switchFrame:'Switch frame:', fitBadge:'Live Tracking',
-    sizeLabel:'Frame Size', restartBtn:'Rescan', guidePanelLabel:'Face Shape Guide',
+    sizeLabel:'Frame Size', verticalLabel:'Vertical Position', restartBtn:'Rescan', guidePanelLabel:'Face Shape Guide',
     compareModalTitle:'Photo Compare', closeBtn:'Close', addFrameTitle:'Add New Frame',
     frameNameLabel:'Frame Name', frameImageLabel:'Frame Image (transparent PNG recommended)',
     shapeLabel:'Shape (used if no image uploaded)', shapeRound:'Round', shapeSquare:'Square', shapeCat:'Cat-eye', shapeThin:'Thin Metal',
@@ -667,6 +676,12 @@ function syncSizeSlider(){
   const scale = (frame && frame.scale) || 1;
   slider.value = scale;
   $('sizeValue').textContent = Math.round(scale*100)+'%';
+  const vSlider = $('verticalSlider');
+  if(vSlider){
+    const offsetY = (frame && frame.offsetY) || 0;
+    vSlider.value = offsetY;
+    $('verticalValue').textContent = Math.round(offsetY*100)+'%';
+  }
 }
 $('sizeSlider') && $('sizeSlider').addEventListener('input', (e)=>{
   const val = parseFloat(e.target.value);
@@ -674,6 +689,15 @@ $('sizeSlider') && $('sizeSlider').addEventListener('input', (e)=>{
   const frame = FRAMES.find(f=>f.id===selectedFrameId);
   if(frame){
     frame.scale = val;
+    saveFrames(FRAMES);
+  }
+});
+$('verticalSlider') && $('verticalSlider').addEventListener('input', (e)=>{
+  const val = parseFloat(e.target.value);
+  $('verticalValue').textContent = Math.round(val*100)+'%';
+  const frame = FRAMES.find(f=>f.id===selectedFrameId);
+  if(frame){
+    frame.offsetY = val;
     saveFrames(FRAMES);
   }
 });
@@ -1034,11 +1058,12 @@ function onTryonResults(results){
 
   const frame = FRAMES.find(f=>f.id===selectedFrameId) || FRAMES[0];
   const scale = (frame && frame.scale) || 1;
+  const offsetY = (frame && frame.offsetY) || 0;
   const glassesWidth = eyeDist * 2.1 * scale;
   const thickness = Math.max(2.2, eyeDist*0.045*scale);
 
   tryonCtx.save();
-  tryonCtx.translate(cx, cy + eyeDist*0.04);
+  tryonCtx.translate(cx, cy + eyeDist*0.04 + eyeDist*0.5*offsetY);
   tryonCtx.rotate(angle);
 
   const img = getImg(frame.image, frame.id+'_f');
