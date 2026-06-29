@@ -207,7 +207,7 @@
   <!-- INTRO -->
   <div class="stage active" id="intro">
     <button id="langToggle" style="position:absolute; top:18px; right:18px; background:var(--panel); border:1px solid var(--line); color:var(--text); padding:6px 14px; border-radius:16px; font-size:12px; cursor:pointer;">EN</button>
-    <h1 data-i18n="introTitle">虚拟试戴眼镜</h1>
+    <h1 data-i18n="introTitle" id="introTitle" style="cursor:default;">虚拟试戴眼镜</h1>
     <p data-i18n="introDesc">先扫描脸部,再选择喜欢的镜框,实时跟随你的脸部移动</p>
     <button class="startBtn" id="startBtn" data-i18n="startBtn">开始扫描</button>
     <p id="loadingMsg"></p>
@@ -395,6 +395,12 @@ const I18N = {
     noFaceHint:'没有检测到脸,请正对摄像头', noFrameLabel:'未戴镜框',
     compareSelected:'已选 2 张,点击对比', compareHintN:n=>`选择2张照片来对比 (${n}/2)`,
     loadingCamera:'正在打开摄像头...', cameraError:m=>'无法访问摄像头,请检查浏览器权限: '+m,
+    webglUnsupportedHint:'此浏览器不支持人脸扫描所需的功能,请用手机自带的Safari(iOS)或Chrome(Android)打开本页面,不要用微信/QQ等App内置浏览器',
+    scanTimeoutHint:'未能检测到人脸,请确保用Safari或Chrome打开本页面、光线充足且正对摄像头,然后重试',
+    scanModelErrorHint:'人脸检测模块加载失败,可能是网络不稳定或浏览器不支持,请尝试切换网络或更换浏览器(Safari/Chrome)后重试',
+    adminPasswordPrompt:'请输入管理员密码以添加/删除镜框:', adminPasswordWrong:'密码错误',
+    adminLoggedIn:'已进入管理模式,现在可以添加/删除镜框', adminLoggedOut:'已退出管理模式',
+    adminLogoutConfirm:'要退出管理模式吗?',
     deleteConfirm:n=>'确定要删除「'+n+'」吗？', catSuffix:' 经典款', framesCountSuffix:' 款镜框'
   },
   en: {
@@ -413,6 +419,12 @@ const I18N = {
     noFaceHint:'No face detected, please face the camera', noFrameLabel:'No frame',
     compareSelected:'2 selected, tap to compare', compareHintN:n=>`Select 2 photos to compare (${n}/2)`,
     loadingCamera:'Opening camera...', cameraError:m=>'Could not access camera, check browser permissions: '+m,
+    webglUnsupportedHint:'This browser does not support the features needed for face scanning. Please open this page in Safari (iOS) or Chrome (Android), not an in-app browser like WeChat/QQ',
+    scanTimeoutHint:'Could not detect a face. Please use Safari or Chrome, make sure lighting is good and your face is facing the camera, then try again',
+    scanModelErrorHint:'The face detection module failed to load. This may be a network issue or unsupported browser. Try switching network or using Safari/Chrome',
+    adminPasswordPrompt:'Enter admin password to add/delete frame styles:', adminPasswordWrong:'Wrong password',
+    adminLoggedIn:'Admin mode on. You can now add/delete frame styles', adminLoggedOut:'Admin mode off',
+    adminLogoutConfirm:'Log out of admin mode?',
     deleteConfirm:n=>'Delete "'+n+'"?', catSuffix:' Classic', framesCountSuffix:' frames'
   }
 };
@@ -572,6 +584,35 @@ let currentCategory = null;
 let selectedFrameId = null;
 
 /* ---------------------------------------------------------- */
+/* Admin mode (only the owner can add/delete frame styles)      */
+/* ---------------------------------------------------------- */
+const ADMIN_PASSWORD = '00000000'; // change this to your own secret
+function isAdmin(){
+  return localStorage.getItem('isAdminUser') === '1';
+}
+function tryUnlockAdmin(){
+  if(isAdmin()){
+    if(confirm(t('adminLogoutConfirm'))){
+      localStorage.removeItem('isAdminUser');
+      alert(t('adminLoggedOut'));
+      buildFrameGrid();
+    }
+    return;
+  }
+  const pw = prompt(t('adminPasswordPrompt'));
+  if(pw === null) return;
+  if(pw === ADMIN_PASSWORD){
+    localStorage.setItem('isAdminUser','1');
+    alert(t('adminLoggedIn'));
+    buildFrameGrid();
+  } else if(pw !== ''){
+    alert(t('adminPasswordWrong'));
+  }
+}
+let titleTapCount = 0;
+let titleTapTimer = null;
+
+/* ---------------------------------------------------------- */
 /* App state machine                                            */
 /* ---------------------------------------------------------- */
 const $ = id=>document.getElementById(id);
@@ -610,39 +651,44 @@ function openCategory(cat){
 function buildFrameGrid(){
   const grid = $('frameGrid');
   grid.innerHTML='';
+  const admin = isAdmin();
   const list = FRAMES.filter(f=>f.category===currentCategory);
   list.forEach(f=>{
     const card = document.createElement('div');
     card.className='frameCard'+(f.id===selectedFrameId?' sel':'');
     card.style.position='relative';
     const visual = f.image ? `<img src="${f.image}" style="max-width:80px; max-height:34px; object-fit:contain;">` : svgPreview(f.shape, f.color);
-    card.innerHTML = visual + `<div class="fname">${f.name}</div><button class="deleteBtn" title="删除">×</button>`;
+    card.innerHTML = visual + `<div class="fname">${f.name}</div>` + (admin ? `<button class="deleteBtn" title="删除">×</button>` : '');
     card.onclick = ()=>{
       selectedFrameId = f.id;
       document.querySelectorAll('.frameCard').forEach(c=>c.classList.remove('sel'));
       card.classList.add('sel');
       $('tryBtn').disabled = false;
     };
-    card.querySelector('.deleteBtn').onclick = (e)=>{
-      e.stopPropagation();
-      if(!confirm(t('deleteConfirm')(f.name))) return;
-      FRAMES = FRAMES.filter(x=>x.id!==f.id);
-      saveFrames(FRAMES);
-      deleteFrameRemote(f.id);
-      delete imgCache[f.id+'_f'];
-      delete imgCache[f.id+'_s'];
-      if(selectedFrameId===f.id) selectedFrameId=null;
-      buildFrameGrid();
-      buildCatGrid();
-      $('tryBtn').disabled = !selectedFrameId;
-    };
+    if(admin){
+      card.querySelector('.deleteBtn').onclick = (e)=>{
+        e.stopPropagation();
+        if(!confirm(t('deleteConfirm')(f.name))) return;
+        FRAMES = FRAMES.filter(x=>x.id!==f.id);
+        saveFrames(FRAMES);
+        deleteFrameRemote(f.id);
+        delete imgCache[f.id+'_f'];
+        delete imgCache[f.id+'_s'];
+        if(selectedFrameId===f.id) selectedFrameId=null;
+        buildFrameGrid();
+        buildCatGrid();
+        $('tryBtn').disabled = !selectedFrameId;
+      };
+    }
     grid.appendChild(card);
   });
-  const addCard = document.createElement('div');
-  addCard.className='frameCard addCard';
-  addCard.innerHTML = '+';
-  addCard.onclick = openAddModal;
-  grid.appendChild(addCard);
+  if(admin){
+    const addCard = document.createElement('div');
+    addCard.className='frameCard addCard';
+    addCard.innerHTML = '+';
+    addCard.onclick = openAddModal;
+    grid.appendChild(addCard);
+  }
 }
 
 function buildThumbRow(){
@@ -739,6 +785,7 @@ function wireImageInput(inputId, previewWrapId, previewImgId, setter){
 wireImageInput('newFrameImageFront','newFrameFrontPreviewWrap','newFrameFrontPreview', v=>pendingImageFront=v);
 
 function openAddModal(){
+  if(!isAdmin()){ alert(t('adminPasswordPrompt')); return; }
   $('newFrameName').value='';
   $('newFrameShape').value='round';
   $('newFrameColor').value='#1a1a1a';
@@ -805,11 +852,24 @@ let scanCoverage = {left:false, mid:false, right:false};
 let scanFaceMesh, scanCtx, scanRunning=false;
 let capturedMidLandmarks = null;
 let capturedVideoSize = {w:640,h:480};
+let scanGotAnyFace = false;
+let scanWatchdogTimer = null;
+
+function checkWebGLSupport(){
+  try{
+    const c = document.createElement('canvas');
+    return !!(window.WebGLRenderingContext && (c.getContext('webgl2') || c.getContext('webgl') || c.getContext('experimental-webgl')));
+  }catch(e){ return false; }
+}
 
 async function runScan(){
+  if(!checkWebGLSupport()){
+    throw new Error(t('webglUnsupportedHint'));
+  }
   goTo('scan');
   scanCoverage = {left:false, mid:false, right:false};
   capturedMidLandmarks = null;
+  scanGotAnyFace = false;
   updateScanUI();
   const video = $('scanVideo');
   const canvas = $('scanCanvas');
@@ -820,9 +880,28 @@ async function runScan(){
   scanCtx = canvas.getContext('2d');
   scanRunning = true;
   scanFaceMesh = createFaceMesh(onScanResults);
+  clearTimeout(scanWatchdogTimer);
+  scanWatchdogTimer = setTimeout(()=>{
+    if(scanRunning && !scanGotAnyFace){
+      scanRunning = false;
+      stopCamera();
+      goTo('intro');
+      $('loadingMsg').textContent = t('scanTimeoutHint');
+    }
+  }, 12000);
   async function loop(){
     if(!scanRunning) return;
-    await scanFaceMesh.send({image: video});
+    try{
+      await scanFaceMesh.send({image: video});
+    }catch(e){
+      console.error('FaceMesh error', e);
+      scanRunning = false;
+      clearTimeout(scanWatchdogTimer);
+      stopCamera();
+      goTo('intro');
+      $('loadingMsg').textContent = t('scanModelErrorHint');
+      return;
+    }
     requestAnimationFrame(loop);
   }
   loop();
@@ -834,6 +913,7 @@ function onScanResults(results){
     $('scanHint').textContent = t('noFaceHint');
     return;
   }
+  scanGotAnyFace = true;
   const lm = results.multiFaceLandmarks[0];
   drawFaceMeshHUD(scanCtx, lm, canvas.width, canvas.height);
   const yaw = estimateYaw(lm);
@@ -928,6 +1008,7 @@ function updateScanUI(){
 }
 function finishScan(){
   scanRunning = false;
+  clearTimeout(scanWatchdogTimer);
   $('scanCheck').classList.add('show');
   setTimeout(()=>{
     stopCamera();
@@ -1177,13 +1258,23 @@ $('faceGuideImg').onclick = ()=>{
 /* ---------------------------------------------------------- */
 /* Event wiring                                                 */
 /* ---------------------------------------------------------- */
+$('introTitle') && $('introTitle').addEventListener('click', ()=>{
+  titleTapCount++;
+  clearTimeout(titleTapTimer);
+  titleTapTimer = setTimeout(()=>{ titleTapCount = 0; }, 2000);
+  if(titleTapCount >= 5){
+    titleTapCount = 0;
+    clearTimeout(titleTapTimer);
+    tryUnlockAdmin();
+  }
+});
 $('startBtn').onclick = async ()=>{
   $('loadingMsg').textContent = t('loadingCamera');
   try{
     await runScan();
     $('loadingMsg').textContent='';
   }catch(e){
-    $('loadingMsg').textContent = t('cameraError')(e.message);
+    $('loadingMsg').textContent = (e && e.message === t('webglUnsupportedHint')) ? e.message : t('cameraError')(e.message);
   }
 };
 $('tryBtn').onclick = ()=>{ if(selectedFrameId) runTryon(); };
